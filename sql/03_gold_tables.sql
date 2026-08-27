@@ -16,13 +16,16 @@ SELECT
         2
     ) AS NetRevenue,
 
-    ABS(
-        SUM(
-            CASE
-                WHEN Quantity < 0 THEN Quantity * UnitPrice
-                ELSE 0
-            END
-        )
+    ROUND(
+        ABS(
+            SUM(
+                CASE
+                    WHEN Quantity < 0 THEN Quantity * UnitPrice
+                    ELSE 0
+                END
+            )
+        ),
+        2
     ) AS ReturnsValue,
 
     COUNT(
