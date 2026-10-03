@@ -58,6 +58,33 @@ Business assumptions encoded in `sql/03_gold_tables.sql`, not universal accounti
 | Country Sales | Net Revenue grouped by `Country`. |
 | Top Products | Positive-quantity revenue only, top 10 by revenue. |
 
+## RFM Customer Segmentation (Extension)
+
+A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the Gold layer with customer segmentation. It runs separately from the Databricks Job and is not one of its tasks.
+
+- **Source:** `workspace.default.silver_sales_v2`.
+- **Filters:** Positive `Quantity` and `UnitPrice` only; `CustomerID` `-1` (unknown customers) is excluded.
+- **Analysis window:** Dynamic 12 months. The reference date is the latest `InvoiceDate` + 1 day, and only sales on or after `reference date - 12 months` are used.
+
+| Metric | Calculation |
+|---|---|
+| Recency | Days between the reference date and the customer's last purchase date. |
+| Frequency | Distinct `InvoiceNo` count in the window. |
+| Monetary | Sum of `Quantity × UnitPrice` in the window. |
+
+**Scores (1–5):**
+
+- **R:** Fixed day thresholds: ≤7 days = 5, ≤14 = 4, ≤30 = 3, ≤60 = 2, otherwise 1.
+- **F:** 4+ invoices = 5, 3 = 4, 2 = 3, otherwise 1.
+- **M:** Quintiles of Monetary across customers in the window.
+
+**Segments:** Champions, Loyal Customers, Potential Loyalists, At Risk, Hibernating, and Needs Attention (the fallback). Rules are applied in that order, and the first match wins.
+
+**Gold outputs** (Delta tables, overwritten on each run):
+
+- `workspace.default.gold_customer_rfm`: One row per customer with reference date, last purchase date, Recency, Frequency, Monetary, R/F/M scores, and Segment.
+- `workspace.default.gold_rfm_segment_summary`: Customer count per segment.
+
 ## Key Engineering Decisions
 
 - **Bronze preserves source metadata** (`source_file`, `ingestion_timestamp`, `batch_id`, `source_system`) so every row can be traced to its file/batch, and Silver has a reliable timestamp for incremental filtering.
@@ -135,6 +162,8 @@ retail-data-engineering-pipeline/
 │   ├── architecture.md
 │   ├── testing.md
 │   └── screenshots/
+├── notebooks/
+│   └── 05_rfm_customer_segmentation.ipynb
 ├── sql/
 │   ├── 00_setup_tables.sql
 │   ├── 01_bronze_ingestion.sql
