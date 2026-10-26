@@ -1,0 +1,6 @@
+{
+  "batch_type": "NEW_DATA",
+  "batch_sequence": 1,
+  "expected_row_count": 541909,
+  "source_system": "online_retail_uci"
+}

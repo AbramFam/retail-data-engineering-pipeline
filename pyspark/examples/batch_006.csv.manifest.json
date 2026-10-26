@@ -1,0 +1,6 @@
+{
+  "batch_type": "CORRECTION",
+  "batch_sequence": 6,
+  "expected_row_count": 5,
+  "source_system": "retail_sales"
+}
