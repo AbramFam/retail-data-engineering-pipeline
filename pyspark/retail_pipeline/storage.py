@@ -25,6 +25,7 @@ class StorageSafetyError(RuntimeError):
 
 def align(df: DataFrame, name: str) -> DataFrame:
     """Select the table's columns in order, cast to the table's types."""
+    _check_known(name)  # refuse unknown tables before anything else (StorageSafetyError, not KeyError)
     schema = TABLE_SCHEMAS[name]
     cols = []
     for field in schema.fields:
