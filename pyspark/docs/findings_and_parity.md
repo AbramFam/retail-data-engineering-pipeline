@@ -2,14 +2,14 @@
 
 ## Evidence levels
 
-Results come from three different places. They are never mixed.
+Results come from four different places. They are never mixed.
 
 | Level | What it covers | Status |
 |---|---|---|
-| **A. Local automated tests** | `pytest` on **synthetic fixtures**, local Parquet store | **96 passed, 0 failed** (Parquet store; 2026-10-26, pyspark 4.0.1, Java 21) |
-| **B. Local Delta tests** | Same scenarios on real local Delta tables | **Not run** (64 Delta variants skipped locally: Delta jars come from Maven, blocked in the build sandbox). Will run in GitHub Actions on push/PR |
+| **A. Local automated tests** | `pytest` on **synthetic fixtures**, local Parquet store | **96 passed, 0 failed** (Parquet store; 2026-10-26, pyspark 4.0.1, Java 21). GitHub Actions run 40410633334: **96 passed** |
+| **B. Local Delta tests** | Same scenarios on real local Delta tables | GitHub Actions run 40410633334 (commit `95cc7a0`, 2026-10-26): **64 passed, 0 failed, 0 skipped**. The previous run found one real bug (storage guard raised `KeyError` instead of `StorageSafetyError`), fixed in `95cc7a0` |
 | **C. Local full-dataset run** | Whole pipeline on a **public copy** of UCI Online Retail (541,909 rows, matches the notebook outputs), local Parquet store | Done: [`results/local_public_uci_run.json`](results/local_public_uci_run.json) |
-| **D. Databricks integration** | Pipeline in `workspace.retail_pipeline_pyspark` on the real Volume file | **Not run.** Requires explicit approval |
+| **D. Databricks integration** | Real Databricks (Free Edition, serverless, Spark 4.3.0.dev0, Delta) | **Passed**, 2026-10-28, commit `95cc7a0`. See [Databricks integration results](#databricks-integration-results-level-d) |
 
 The public copy was checked against the legacy notebook outputs before use: 541,909 rows,
 4,879 exact-duplicate groups, prefix-5 revenue 10,655,622.48, C revenue −896,812.49,
@@ -96,6 +96,52 @@ These differences are asserted, using the original SQL text, in `tests/test_pari
 
 ## Open items
 
-* Run level B (CI) and level D (Databricks) after approval.
+* Create the Databricks Job (Phase 5 of the procedure).
 * Decide on service codes and cancelled-order treatment in Top Products.
 * `batch_001`–`batch_005` (the SQL base data) would allow testing `batch_006` on real data.
+
+## Databricks integration results (level D)
+
+Run on 2026-10-27/28 in the user's Databricks Free Edition workspace (serverless compute,
+Spark `4.3.0.dev0`, ANSI on), code from the Git folder on branch `pyspark-implementation`
+at commit `95cc7a0`. Every phase followed [databricks_integration_procedure.md](databricks_integration_procedure.md).
+
+### Phase 1: read-only checks
+
+| Check | Result |
+|---|---|
+| Rows the SQL `InvoiceNo + StockCode` dedup removes (real `bronze_sales_v2`) | **10,684** (same as the local analysis) |
+| `retail_pipeline_test.bronze_sales_v2` / `silver_sales_v2` | 541,909 / 541,909 (legacy Silver has no dedup) |
+| `default.silver_sales_v2` | 43 rows: the small base the SQL `batch_006` test ran on; keys `600002/71053` and `600004/84029G` have 1 line each there |
+| Storage guard on `workspace.default` and `workspace.retail_pipeline_test` | Refused (`StorageSafetyError`) |
+| Deterministic row numbering on the real Volume file | 541,909 rows, same SHA-256 on two reads, max `source_row_number` 541,909 |
+| Baseline before any write | `default`: 17 tables, last change 2026-10-26 00:52 UTC; `retail_pipeline_test`: 4 tables, last change 2026-10-26 12:54 UTC; `retail_pipeline_pyspark` absent |
+
+### Phase 2: isolated schemas
+
+`workspace.retail_pipeline_pyspark` and `workspace.retail_pipeline_pyspark_it` created, each with a
+`landing` Volume and the 10 pipeline tables.
+
+### Phase 3: synthetic scenarios on Delta (`retail_pipeline_pyspark_it`)
+
+Script: [`../scripts/integration_scenario.py`](../scripts/integration_scenario.py). **16/16 checks passed** (about 7 minutes):
+repeated lines kept; replay is a no-op; a CORRECTION supersedes and keeps history; a CORRECTION with an
+invalid row is held, fails the commit task and holds the watermark; a newer valid CORRECTION resolves it;
+an edited immutable file is refused with nothing ingested.
+
+### Phase 4 + 7: real data (`retail_pipeline_pyspark`) and untouched-tables proof
+
+The Volume file was **copied** (not moved) into the pipeline's landing Volume. **19/19 checks passed**:
+
+| Check | Result |
+|---|---|
+| Bronze rows / distinct `bronze_row_id` | 541,909 / 541,909 |
+| Silver CURRENT lines / quarantine / exact repeats | 541,909 / 0 / 5,268 |
+| GrossRevenue / ReturnsValue / NetRevenue | 10,655,622.48 / 896,812.49 / 9,758,809.99 |
+| TotalCustomers / TotalOrders / AOV | 4,372 / 20,725 / 470.87 (= Notebook 08) |
+| Batch status / watermark | COMMITTED / 1 |
+| `default` after the run | 17 tables, nothing altered after the baseline; `silver_sales_v2` still 43 rows |
+| `retail_pipeline_test` after the run | 4 tables, nothing altered after the baseline; `silver_sales_v2` still 541,909 rows |
+
+Note: Spark logs a warning that the Top Products ranking window has no partition. It ranks about 4,000
+aggregated StockCodes, so it is harmless at this size.

@@ -68,17 +68,31 @@ Full-file check (local, writes nothing to Databricks):
 python scripts/validate_full_dataset.py --landing <dir with CSV + manifest> --work /tmp/run
 ```
 
-## Running in Databricks (not done yet — requires approval)
+## Running in Databricks
+
+Validated on 2026-10-28 (Databricks Free Edition, serverless): 16/16 synthetic scenarios and 19/19 full-data checks passed. Results: [docs/findings_and_parity.md](docs/findings_and_parity.md#databricks-integration-results-level-d).
 
 1. Add this repository as a Databricks Git folder on the `pyspark-implementation` branch.
 2. Run `notebooks/10_pyspark_setup.py` once. It creates the schema `workspace.retail_pipeline_pyspark`,
    the Volume `landing`, and the empty tables. It never replaces an existing table.
 3. Upload the CSV and its manifest to `/Volumes/workspace/retail_pipeline_pyspark/landing/incoming/`.
-4. Create a Job with tasks `11_pyspark_bronze → 12_pyspark_silver → 13_pyspark_gold → 14_pyspark_commit`,
-   each depending on the previous one succeeding. Pass `run_id = {{job.run_id}}` as a parameter,
-   and optionally add a file-arrival trigger on the landing path.
+4. Create the Job (see "Databricks Job" below).
 5. If task 14 fails with open correction rejections, review `correction_rejections`, then send a
    newer `CORRECTION` batch or resolve the rejection manually (see the notebook).
 
 The existing tables in `workspace.default` and `workspace.retail_pipeline_test` are never written;
 the Delta store refuses those schemas.
+
+## Databricks Job
+
+Definition: [jobs/retail_pyspark_pipeline.job.yml](jobs/retail_pyspark_pipeline.job.yml). To create it in the UI:
+
+1. **Jobs & Pipelines → Create → Job**, name it `retail_pyspark_pipeline`.
+2. Task `bronze`: type **Notebook**, source **Workspace**, path `.../retail-data-engineering-pipeline/pyspark/notebooks/11_pyspark_bronze`, compute **Serverless**.
+3. Add tasks `silver` (12), `gold` (13) and `commit` (14) the same way, each **Depends on** the previous task.
+4. Job **parameters**: `target_schema = workspace.retail_pipeline_pyspark`,
+   `landing_dir = /Volumes/workspace/retail_pipeline_pyspark/landing/incoming`, `run_id = {{job.run_id}}`.
+5. **Run now**. With no new files it is a replay: nothing changes and every task succeeds.
+6. Optional: add a **File arrival** trigger on the landing path, after a manual run succeeds.
+
+The Job runs whatever branch the Git folder is on.
