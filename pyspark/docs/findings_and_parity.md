@@ -89,7 +89,10 @@ These differences are asserted, using the original SQL text, in `tests/test_pari
    the separate base data in `workspace.default` (UCI invoices end at 581587). On a UCI base
    all five rows are inserts. The update path is tested with a synthetic base.
 3. **Top products include service codes**: `DOT` (postage) is #1, `M` (manual) #8, `POST` #9.
-   Neither SQL nor Notebook 08 excludes them. Open business question.
+   Neither SQL nor Notebook 08 excludes them. Resolved additively (rule v1): `gold_top_products` is unchanged and
+   new `gold_top_merchandise` / `gold_revenue_by_class` tables classify StockCodes
+   ([proposal](proposal_product_classification.md)). Local full-data run: class totals sum to GrossRevenue
+   10,655,622.48 exactly; top merchandise #1 is 22423 (174,484.74). Databricks run of these two tables: pending.
 4. **StockCode 23843** ranks #3 from a single 80,995-unit order that was later cancelled
    (gross uses sales lines only, by definition). Open business question.
 5. **Sub-cent prices**: 4 rows at 0.001 become 0.00 under `DECIMAL(10,2)`; kept at 4 dp here.
@@ -97,7 +100,8 @@ These differences are asserted, using the original SQL text, in `tests/test_pari
 ## Open items
 
 * Create the Databricks Job (Phase 5 of the procedure).
-* Decide on service codes and cancelled-order treatment in Top Products.
+* Decide on cancelled-order treatment in Top Products (StockCode 23843).
+* Build `gold_top_merchandise` / `gold_revenue_by_class` in Databricks (next Gold run).
 * `batch_001`–`batch_005` (the SQL base data) would allow testing `batch_006` on real data.
 
 ## Databricks integration results (level D)

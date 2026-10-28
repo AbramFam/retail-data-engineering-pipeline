@@ -13,6 +13,9 @@ pyspark/docs/findings_and_parity.md):
   * Top products  = StockCode identity; gross revenue of positive sales lines;
                     Description = most frequent non-'Unknown Product' description
                     on those lines, ties -> latest InvoiceDate, then alphabetical.
+Additional tables (rule v1, retail_pipeline/classification.py), existing ones unchanged:
+  * gold_top_merchandise  = Top products restricted to class PRODUCT (+ NeedsReview flag).
+  * gold_revenue_by_class = non-cancellation revenue per class; sums to GrossRevenue.
 All checks run before any table is written.
 """
 from dataclasses import dataclass
@@ -21,11 +24,12 @@ from typing import List
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
-from . import registry
+from . import classification, registry
 from .config import UNKNOWN_PRODUCT, BatchStatus, LineStatus
 from .context import PipelineContext
 
-GOLD_TABLES = ["gold_kpis", "gold_monthly_sales", "gold_sales_by_country", "gold_top_products"]
+GOLD_TABLES = ["gold_kpis", "gold_monthly_sales", "gold_sales_by_country", "gold_top_products",
+               "gold_top_merchandise", "gold_revenue_by_class"]
 
 
 class GoldValidationError(RuntimeError):
@@ -38,6 +42,8 @@ class GoldResult:
     monthly: DataFrame
     by_country: DataFrame
     top_products: DataFrame
+    top_merchandise: DataFrame
+    revenue_by_class: DataFrame
     totals: dict
     warnings: List[str]
 
@@ -94,11 +100,26 @@ def build(ctx: PipelineContext, silver: DataFrame) -> GoldResult:
                     .agg(F.count("*").alias("n"), F.max("InvoiceDate").alias("last_seen"))
                     .withColumn("r", F.row_number().over(desc_rank)).filter("r = 1")
                     .select("StockCode", "Description"))
-    top = (revenue.join(descriptions, "StockCode", "left")
-           .withColumn("Description", F.coalesce("Description", F.lit(UNKNOWN_PRODUCT)))
-           .withColumn("Rank", F.row_number().over(Window.orderBy(F.desc("GrossRevenue"), F.asc("StockCode"))))
-           .filter("Rank <= 10")
-           .select("Rank", "StockCode", "Description", F.round("GrossRevenue", 2).alias("GrossRevenue"), "UnitsSold"))
+    def ranked(rev):
+        return (rev.join(descriptions, "StockCode", "left")
+                .withColumn("Description", F.coalesce("Description", F.lit(UNKNOWN_PRODUCT)))
+                .withColumn("Rank", F.row_number().over(Window.orderBy(F.desc("GrossRevenue"), F.asc("StockCode"))))
+                .filter("Rank <= 10"))
+
+    top = ranked(revenue).select("Rank", "StockCode", "Description",
+                                 F.round("GrossRevenue", 2).alias("GrossRevenue"), "UnitsSold")
+
+    # Additional tables (classification rule v1). Existing tables above are unchanged.
+    merch_revenue = revenue.filter(classification.product_class() == classification.PRODUCT)
+    top_merch = ranked(merch_revenue).select(
+        "Rank", "StockCode", "Description", F.round("GrossRevenue", 2).alias("GrossRevenue"), "UnitsSold",
+        classification.needs_review().alias("NeedsReview"))
+    by_class_raw = (retail.filter(~F.col("is_cancellation"))
+                    .groupBy(classification.product_class().alias("ProductClass"))
+                    .agg(F.sum("Revenue").alias("GrossRevenue"), F.count("*").alias("SalesLines")))
+    totals["class_sum"] = by_class_raw.agg(F.coalesce(F.sum("GrossRevenue"), zero)).first()[0]
+    by_class = by_class_raw.select("ProductClass", F.round("GrossRevenue", 2).alias("GrossRevenue"), "SalesLines",
+                                   F.lit(classification.RULE_VERSION).alias("rule_version"))
 
     warnings = []
     if totals["neg_sales_lines"]:
@@ -110,7 +131,8 @@ def build(ctx: PipelineContext, silver: DataFrame) -> GoldResult:
         kpis=kpis,
         monthly=monthly_raw.select("Month", F.round("NetRevenue", 2).alias("NetRevenue")),
         by_country=country_raw.select("Country", F.round("NetRevenue", 2).alias("NetRevenue")),
-        top_products=top, totals=totals, warnings=warnings,
+        top_products=top, top_merchandise=top_merch, revenue_by_class=by_class,
+        totals=totals, warnings=warnings,
     )
 
 
@@ -138,13 +160,15 @@ def validate(result: GoldResult) -> None:
                 errors.append(f"KPI {c} is NULL")
         if (k["AOV"] is None) != (k["TotalOrders"] == 0):
             errors.append("AOV must be NULL exactly when TotalOrders is 0")
-    top = result.top_products
-    if top.count() > 10:
-        errors.append("more than 10 top products")
-    if top.select("StockCode").distinct().count() != top.count():
-        errors.append("duplicate StockCode in top products")
-    if top.filter(F.col("Description").isNull()).count():
-        errors.append("top product without Description")
+    if t["class_sum"] != gross:
+        errors.append(f"revenue by class {t['class_sum']} != Gross {gross}")
+    for label, top in [("top products", result.top_products), ("top merchandise", result.top_merchandise)]:
+        if top.count() > 10:
+            errors.append(f"more than 10 {label}")
+        if top.select("StockCode").distinct().count() != top.count():
+            errors.append(f"duplicate StockCode in {label}")
+        if top.filter(F.col("Description").isNull()).count():
+            errors.append(f"{label} row without Description")
     if errors:
         raise GoldValidationError("Gold validation failed; no Gold table was written:\n  - " + "\n  - ".join(errors))
 
@@ -163,6 +187,8 @@ def run(ctx: PipelineContext, force: bool = False) -> List[str]:
     ctx.store.overwrite("gold_monthly_sales", result.monthly)
     ctx.store.overwrite("gold_sales_by_country", result.by_country)
     ctx.store.overwrite("gold_top_products", result.top_products)
+    ctx.store.overwrite("gold_top_merchandise", result.top_merchandise)
+    ctx.store.overwrite("gold_revenue_by_class", result.revenue_by_class)
     ctx.store.overwrite("gold_kpis", result.kpis)
     registry.set_status(ctx, pending, BatchStatus.GOLD_PUBLISHED)
     return pending

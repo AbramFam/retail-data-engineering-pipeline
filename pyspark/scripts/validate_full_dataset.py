@@ -81,6 +81,9 @@ def main():
         "invalid_customer_lines": silver.filter("NOT is_valid_customer").count(),
         "kpis": {c: str(v) for c, v in k.items() if c not in ("gold_run_id", "published_at")},
         "top_products": [r.asDict() for r in store.read("gold_top_products").orderBy("Rank").collect()],
+        "top_merchandise": [{k2: str(v) for k2, v in r.asDict().items()}
+                            for r in store.read("gold_top_merchandise").orderBy("Rank").collect()],
+        "revenue_by_class": {r["ProductClass"]: str(r["GrossRevenue"]) for r in store.read("gold_revenue_by_class").collect()},
         "monthly_rows": store.read("gold_monthly_sales").count(),
         "country_rows": store.read("gold_sales_by_country").count(),
     }

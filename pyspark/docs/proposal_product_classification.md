@@ -1,7 +1,10 @@
 # Proposal: Product vs. Service Classification for Top Products
 
-**Status: PROPOSAL, not implemented.** No financial definition changes. `gold_top_products`
-and every KPI keep their current (Notebook 08) definitions until this is approved.
+**Status: APPROVED (2026-10-29) and implemented as rule v1** in
+[`retail_pipeline/classification.py`](../retail_pipeline/classification.py). Only the two additional
+tables use it; `gold_top_products` and every KPI keep their Notebook 08 definitions.
+Implementation note: the reference list is a versioned constant in code (`RULE_VERSION = "v1"`,
+stored in `gold_revenue_by_class.rule_version`) rather than a separate reference table.
 
 ## Problem
 
@@ -69,7 +72,7 @@ FEE_OR_CHARGE 13,926.09 · GIFT_VOUCHER 685.81. **Total 10,655,622.48 = GrossRev
 Top Products uses gross sales by definition. Whether to rank on net-of-cancellation sales
 is a different decision and is not part of this proposal.
 
-## Decisions needed
+## Decisions (approved 2026-10-29)
 
 1. Approve the classes and the reference list above (or edit them).
 2. Approve adding `gold_top_merchandise` and `gold_revenue_by_class` (existing tables unchanged).

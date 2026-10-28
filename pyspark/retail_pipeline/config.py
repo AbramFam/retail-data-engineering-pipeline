@@ -196,6 +196,14 @@ GOLD_TOP_PRODUCTS = StructType([
     _s("UnitsSold", LONG),
 ])
 
+GOLD_TOP_MERCHANDISE = StructType(GOLD_TOP_PRODUCTS.fields + [_s("NeedsReview", BooleanType())])
+GOLD_REVENUE_BY_CLASS = StructType([
+    _s("ProductClass"),
+    _s("GrossRevenue", DecimalType(38, 2)),
+    _s("SalesLines", LONG),
+    _s("rule_version"),
+])
+
 TABLE_SCHEMAS = {
     "batch_registry": BATCH_REGISTRY,
     "bronze_sales": BRONZE_SALES,
@@ -207,4 +215,6 @@ TABLE_SCHEMAS = {
     "gold_monthly_sales": GOLD_MONTHLY_SALES,
     "gold_sales_by_country": GOLD_SALES_BY_COUNTRY,
     "gold_top_products": GOLD_TOP_PRODUCTS,
+    "gold_top_merchandise": GOLD_TOP_MERCHANDISE,
+    "gold_revenue_by_class": GOLD_REVENUE_BY_CLASS,
 }

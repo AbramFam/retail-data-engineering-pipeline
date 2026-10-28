@@ -107,7 +107,7 @@ INGESTED -> SILVER_APPLIED -> GOLD_PUBLISHED -> COMMITTED
 
 `batch_registry`, `bronze_sales`, `silver_sales`, `silver_quarantine`,
 `correction_rejections`, `pipeline_watermark`, `gold_kpis`, `gold_monthly_sales`,
-`gold_sales_by_country`, `gold_top_products`.
+`gold_sales_by_country`, `gold_top_products`, `gold_top_merchandise`, `gold_revenue_by_class`.
 
 The Delta store refuses `workspace.default` and `workspace.retail_pipeline_test`
 and only writes table names it knows.
