@@ -6,7 +6,7 @@ before they run.** Nothing in this procedure touches `workspace.default` or
 
 Prerequisite: GitHub Actions green on `pyspark-implementation` (Parquet **and** Delta jobs).
 
-**Status (2026-10-28):** Phases 1, 2, 3, 4 and 7 done and passed; Phase 5 (Job) pending.
+**Status (2026-10-29):** Phases 1, 2, 3, 4, 5 and 7 done and passed.
 Results: [findings_and_parity.md](findings_and_parity.md#databricks-integration-results-level-d).
 Phase 3 ran [`scripts/integration_scenario.py`](../scripts/integration_scenario.py); Phases 4 and 7 ran the equivalent
 checks from one notebook cell (same expected values as the tables below).

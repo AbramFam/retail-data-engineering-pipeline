@@ -92,16 +92,14 @@ These differences are asserted, using the original SQL text, in `tests/test_pari
    Neither SQL nor Notebook 08 excludes them. Resolved additively (rule v1): `gold_top_products` is unchanged and
    new `gold_top_merchandise` / `gold_revenue_by_class` tables classify StockCodes
    ([proposal](proposal_product_classification.md)). Local full-data run: class totals sum to GrossRevenue
-   10,655,622.48 exactly; top merchandise #1 is 22423 (174,484.74). Databricks run of these two tables: pending.
+   10,655,622.48 exactly; top merchandise #1 is 22423 (174,484.74). Databricks (2026-10-29, Job run): identical values.
 4. **StockCode 23843** ranks #3 from a single 80,995-unit order that was later cancelled
    (gross uses sales lines only, by definition). Open business question.
 5. **Sub-cent prices**: 4 rows at 0.001 become 0.00 under `DECIMAL(10,2)`; kept at 4 dp here.
 
 ## Open items
 
-* Create the Databricks Job (Phase 5 of the procedure).
 * Decide on cancelled-order treatment in Top Products (StockCode 23843).
-* Build `gold_top_merchandise` / `gold_revenue_by_class` in Databricks (next Gold run).
 * `batch_001`–`batch_005` (the SQL base data) would allow testing `batch_006` on real data.
 
 ## Databricks integration results (level D)
@@ -149,3 +147,15 @@ The Volume file was **copied** (not moved) into the pipeline's landing Volume. *
 
 Note: Spark logs a warning that the Top Products ranking window has no partition. It ranks about 4,000
 aggregated StockCodes, so it is harmless at this size.
+
+### Phase 5: Databricks Job and classification tables (2026-10-29)
+
+Job `retail_pyspark_pipeline` created in the UI from the Git folder at commit `946f9fd`:
+tasks `bronze → silver → gold → commit` (notebooks 11–14, serverless), job parameters
+`target_schema`, `landing_dir`, `run_id = {{job.run_id}}`. First run: all four tasks succeeded (2m 15s);
+the already-ingested file was skipped and Gold built the two new tables.
+
+| Table | Databricks result (= local full-data run) |
+|---|---|
+| `gold_revenue_by_class` | PRODUCT 10,271,433.06 (530,259 lines) · SHIPPING 291,401.65 (1,981) · MANUAL_ADJUSTMENT 78,175.87 (330) · FEE_OR_CHARGE 13,926.09 (14) · GIFT_VOUCHER 685.81 (34). Total 10,655,622.48 = GrossRevenue; 532,618 lines = all non-cancellation, non-adjustment lines |
+| `gold_top_merchandise` | #1 22423 REGENCY CAKESTAND 3 TIER 174,484.74 … #9 84879 59,094.93; no service codes; NeedsReview false for all ten |
