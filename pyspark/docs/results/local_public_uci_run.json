@@ -1,0 +1,226 @@
+{
+  "run": {
+    "bronze": {
+      "ingested": [
+        "online_retail.csv"
+      ],
+      "skipped": []
+    },
+    "silver": [
+      "online_retail.csv"
+    ],
+    "gold": [
+      "online_retail.csv"
+    ],
+    "commit": {
+      "committed": [
+        "online_retail.csv"
+      ],
+      "blocked": [],
+      "watermark": 1,
+      "previous_watermark": null
+    }
+  },
+  "elapsed_seconds": 96.7,
+  "bronze_rows": 541909,
+  "distinct_bronze_row_ids": 541909,
+  "silver_rows_by_status": {
+    "CURRENT": 541909
+  },
+  "quarantine_by_reason": {},
+  "exact_repeat_lines": 5268,
+  "exact_repeat_revenue": "21740.9800",
+  "zero_price_lines": 2515,
+  "invalid_customer_lines": 135080,
+  "kpis": {
+    "GrossRevenue": "10655622.48",
+    "ReturnsValue": "896812.49",
+    "NetRevenue": "9758809.99",
+    "TotalCustomers": "4372",
+    "TotalOrders": "20725",
+    "AOV": "470.87",
+    "AdjustmentsExcludedValue": "-11062.06"
+  },
+  "top_products": [
+    {
+      "Rank": "1",
+      "StockCode": "DOT",
+      "Description": "DOTCOM POSTAGE",
+      "GrossRevenue": "206248.77",
+      "UnitsSold": "706"
+    },
+    {
+      "Rank": "2",
+      "StockCode": "22423",
+      "Description": "REGENCY CAKESTAND 3 TIER",
+      "GrossRevenue": "174484.74",
+      "UnitsSold": "13879"
+    },
+    {
+      "Rank": "3",
+      "StockCode": "23843",
+      "Description": "PAPER CRAFT , LITTLE BIRDIE",
+      "GrossRevenue": "168469.60",
+      "UnitsSold": "80995"
+    },
+    {
+      "Rank": "4",
+      "StockCode": "85123A",
+      "Description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "GrossRevenue": "104518.80",
+      "UnitsSold": "37660"
+    },
+    {
+      "Rank": "5",
+      "StockCode": "47566",
+      "Description": "PARTY BUNTING",
+      "GrossRevenue": "99504.33",
+      "UnitsSold": "18295"
+    },
+    {
+      "Rank": "6",
+      "StockCode": "85099B",
+      "Description": "JUMBO BAG RED RETROSPOT",
+      "GrossRevenue": "94340.05",
+      "UnitsSold": "48474"
+    },
+    {
+      "Rank": "7",
+      "StockCode": "23166",
+      "Description": "MEDIUM CERAMIC TOP STORAGE JAR",
+      "GrossRevenue": "81700.92",
+      "UnitsSold": "78033"
+    },
+    {
+      "Rank": "8",
+      "StockCode": "M",
+      "Description": "Manual",
+      "GrossRevenue": "78110.27",
+      "UnitsSold": "7224"
+    },
+    {
+      "Rank": "9",
+      "StockCode": "POST",
+      "Description": "POSTAGE",
+      "GrossRevenue": "78101.88",
+      "UnitsSold": "3150"
+    },
+    {
+      "Rank": "10",
+      "StockCode": "23084",
+      "Description": "RABBIT NIGHT LIGHT",
+      "GrossRevenue": "66964.99",
+      "UnitsSold": "30788"
+    }
+  ],
+  "top_merchandise": [
+    {
+      "Rank": "1",
+      "StockCode": "22423",
+      "Description": "REGENCY CAKESTAND 3 TIER",
+      "GrossRevenue": "174484.74",
+      "UnitsSold": "13879",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "2",
+      "StockCode": "23843",
+      "Description": "PAPER CRAFT , LITTLE BIRDIE",
+      "GrossRevenue": "168469.60",
+      "UnitsSold": "80995",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "3",
+      "StockCode": "85123A",
+      "Description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "GrossRevenue": "104518.80",
+      "UnitsSold": "37660",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "4",
+      "StockCode": "47566",
+      "Description": "PARTY BUNTING",
+      "GrossRevenue": "99504.33",
+      "UnitsSold": "18295",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "5",
+      "StockCode": "85099B",
+      "Description": "JUMBO BAG RED RETROSPOT",
+      "GrossRevenue": "94340.05",
+      "UnitsSold": "48474",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "6",
+      "StockCode": "23166",
+      "Description": "MEDIUM CERAMIC TOP STORAGE JAR",
+      "GrossRevenue": "81700.92",
+      "UnitsSold": "78033",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "7",
+      "StockCode": "23084",
+      "Description": "RABBIT NIGHT LIGHT",
+      "GrossRevenue": "66964.99",
+      "UnitsSold": "30788",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "8",
+      "StockCode": "22086",
+      "Description": "PAPER CHAIN KIT 50'S CHRISTMAS",
+      "GrossRevenue": "64952.29",
+      "UnitsSold": "19355",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "9",
+      "StockCode": "84879",
+      "Description": "ASSORTED COLOUR BIRD ORNAMENT",
+      "GrossRevenue": "59094.93",
+      "UnitsSold": "36461",
+      "NeedsReview": "False"
+    },
+    {
+      "Rank": "10",
+      "StockCode": "79321",
+      "Description": "CHILLI LIGHTS",
+      "GrossRevenue": "54117.76",
+      "UnitsSold": "10306",
+      "NeedsReview": "False"
+    }
+  ],
+  "revenue_by_class": {
+    "MANUAL_ADJUSTMENT": "78175.87",
+    "FEE_OR_CHARGE": "13926.09",
+    "GIFT_VOUCHER": "685.81",
+    "PRODUCT": "10271433.06",
+    "SHIPPING": "291401.65"
+  },
+  "monthly_rows": 13,
+  "country_rows": 38,
+  "sql_silver_rows": 531225,
+  "sql_silver_revenue": "9683331.92",
+  "pyspark_current_revenue_incl_adjustments": "9747747.9340",
+  "sql_gold_on_sql_silver": {
+    "GrossRevenue": "10564891.61",
+    "NetRevenue": "9683331.92",
+    "ReturnsValue": "881559.69",
+    "TotalCustomers": "4372",
+    "AOV": "373.87",
+    "TotalOrders": "25900"
+  },
+  "sql_gold_on_pyspark_silver": {
+    "GrossRevenue": "10644560.42",
+    "NetRevenue": "9747747.93",
+    "ReturnsValue": "896812.49",
+    "TotalCustomers": "4372",
+    "AOV": "376.36",
+    "TotalOrders": "25900"
+  }
+}

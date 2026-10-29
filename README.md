@@ -85,6 +85,12 @@ A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the 
 - `workspace.default.gold_customer_rfm`: One row per customer with reference date, last purchase date, Recency, Frequency, Monetary, R/F/M scores, and Segment.
 - `workspace.default.gold_rfm_segment_summary`: Customer count per segment.
 
+## PySpark Implementation (Line-Level)
+
+A separate PySpark implementation lives in [`pyspark/`](pyspark/README.md). It does not replace or modify the SQL pipeline above and writes only to its own schema, `workspace.retail_pipeline_pyspark`.
+
+Main differences: it keeps every source line (the `InvoiceNo + StockCode` key is not unique in the data), applies updates only through explicit, versioned `CORRECTION` batches, quarantines invalid rows with reasons, and tracks batch status so the watermark never moves past a failed step or an unreviewed correction. It is covered by automated tests in GitHub Actions (Parquet and Delta) and was validated in Databricks on the full 541,909-row dataset, reproducing the Notebook 08 KPIs exactly without touching any existing table. Details: [design](pyspark/docs/design.md), [findings and SQL parity](pyspark/docs/findings_and_parity.md).
+
 ## Key Engineering Decisions
 
 - **Bronze preserves source metadata** (`source_file`, `ingestion_timestamp`, `batch_id`, `source_system`) so every row can be traced to its file/batch, and Silver has a reliable timestamp for incremental filtering.

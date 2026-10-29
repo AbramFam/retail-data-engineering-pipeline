@@ -2,3 +2,10 @@
 Thumbs.db
 .vscode/
 *.log
+# PySpark implementation (local runs and tests)
+__pycache__/
+*.pyc
+.pytest_cache/
+spark-warehouse/
+metastore_db/
+derby.log
