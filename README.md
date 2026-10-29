@@ -1,6 +1,49 @@
 # Retail Data Engineering Pipeline
 
-An incremental data pipeline built in Databricks using the Medallion Architecture. It ingests retail sales CSV files and processes them through Bronze, Silver, and Gold layers using incremental processing, watermarking, `MERGE` operations, and Databricks Workflows orchestration.
+[![pyspark-tests](https://github.com/AbramFam/retail-data-engineering-pipeline/actions/workflows/pyspark-tests.yml/badge.svg)](https://github.com/AbramFam/retail-data-engineering-pipeline/actions/workflows/pyspark-tests.yml)
+
+An incremental retail sales pipeline on Databricks (Medallion Architecture), built twice: first in SQL, then rebuilt in PySpark after an audit found the SQL version silently dropping real sales lines.
+
+## Highlights
+
+- **Found a silent data-loss bug.** The SQL Silver layer deduplicated on `InvoiceNo + StockCode`, which is not unique in the data. It dropped **10,684 legitimate sales lines (64,416.01 in net revenue)** out of 541,909, confirmed on the real Databricks tables.
+- **Rebuilt it line-level in PySpark.** Every source line gets a stable identity; changes arrive only as explicit, versioned `CORRECTION` batches; invalid rows are quarantined with reasons; the watermark never moves past a failed step or an unreviewed correction.
+- **Proved it end to end.** 194 automated tests in GitHub Actions (including real Delta Lake `MERGE`), 6 integration scenarios (16 checks) in Databricks, and a full 541,909-row run that reproduces the validated KPIs to the cent, with every pre-existing table verified untouched.
+- **Runs as a Databricks Job.** `bronze → silver → gold → commit` on serverless compute; re-running it is safe (idempotent).
+
+## SQL vs. PySpark at a Glance
+
+| | SQL pipeline ([`sql/`](sql/)) | PySpark pipeline ([`pyspark/`](pyspark/README.md)) |
+|---|---|---|
+| Silver grain | One row per `InvoiceNo + StockCode` | One row per source line |
+| Rows kept (UCI data) | 531,225 of 541,909 | 541,909 of 541,909 |
+| Updates | Implicit: same key in a later batch overwrites | Explicit `CORRECTION` batches, versioned by `batch_sequence` |
+| Invalid values | Cast to NULL silently | Quarantined with a reason per row |
+| Incremental control | Timestamp watermark after Gold | Per-batch status registry + watermark, blocked by unreviewed corrections |
+| Testing | 13 documented manual checks | 194 automated tests (CI) + Databricks integration runs |
+
+```mermaid
+flowchart LR
+    A["CSV + manifest<br/>(NEW_DATA / CORRECTION)"] --> B["Bronze<br/>raw lines + row identity"]
+    B --> C["Silver<br/>typed lines, versioned corrections"]
+    C -. invalid rows .-> Q["Quarantine<br/>with reasons"]
+    C -. rejected corrections .-> R["Review queue"]
+    C --> D["Gold<br/>KPIs, monthly, country,<br/>top products, top merchandise"]
+    D --> E["Commit<br/>batch status + watermark"]
+    R -. blocks .-> E
+```
+
+Results on the full dataset (identical in local runs, CI and Databricks):
+
+| Gross revenue | Returns | Net revenue | Customers | Orders | AOV |
+|---|---|---|---|---|---|
+| 10,655,622.48 | 896,812.49 | 9,758,809.99 | 4,372 | 20,725 | 470.87 |
+
+Full story: [findings and SQL parity](pyspark/docs/findings_and_parity.md) · [design](pyspark/docs/design.md) · [Databricks validation procedure](pyspark/docs/databricks_integration_procedure.md).
+
+---
+
+The sections below document the original SQL pipeline.
 
 ## Architecture
 
@@ -16,11 +59,10 @@ Full diagram and per-task dependency breakdown: [docs/architecture.md](docs/arch
 
 ## Technologies Used
 
-- Databricks
-- SQL
-- Delta Lake
-- Databricks Workflows
-- Databricks Volumes
+- Databricks (serverless compute, Jobs/Workflows, Volumes, Git folders, Unity Catalog)
+- SQL and PySpark
+- Delta Lake (`COPY INTO`, `MERGE`)
+- pytest and GitHub Actions (CI with real Delta Lake tests)
 - Git and GitHub
 
 ## Pipeline Automation and Incremental Processing
@@ -87,14 +129,14 @@ A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the 
 
 ## PySpark Implementation (Line-Level)
 
-A separate PySpark implementation lives in [`pyspark/`](pyspark/README.md). It does not replace or modify the SQL pipeline above and writes only to its own schema, `workspace.retail_pipeline_pyspark`.
+A separate PySpark implementation lives in [`pyspark/`](pyspark/README.md) (summary in [Highlights](#highlights)). It does not replace or modify the SQL pipeline above and writes only to its own schema, `workspace.retail_pipeline_pyspark`.
 
 Main differences: it keeps every source line (the `InvoiceNo + StockCode` key is not unique in the data), applies updates only through explicit, versioned `CORRECTION` batches, quarantines invalid rows with reasons, and tracks batch status so the watermark never moves past a failed step or an unreviewed correction. It is covered by automated tests in GitHub Actions (Parquet and Delta) and was validated in Databricks on the full 541,909-row dataset, reproducing the Notebook 08 KPIs exactly without touching any existing table. Details: [design](pyspark/docs/design.md), [findings and SQL parity](pyspark/docs/findings_and_parity.md).
 
 ## Key Engineering Decisions
 
 - **Bronze preserves source metadata** (`source_file`, `ingestion_timestamp`, `batch_id`, `source_system`) so every row can be traced to its file/batch, and Silver has a reliable timestamp for incremental filtering.
-- **Silver uses a business key (`InvoiceNo + StockCode`) and latest-record logic** because the same invoice/product pair can reappear across batches if a record is corrected or resent; only the newest version should apply.
+- **Silver uses a business key (`InvoiceNo + StockCode`) and latest-record logic** because the same invoice/product pair can reappear across batches if a record is corrected or resent; only the newest version should apply. *A later audit showed this key is not unique in the source data, so this step drops legitimate lines; the PySpark implementation replaces it with line-level identity and explicit corrections.*
 - **`MERGE` replaces insert-only processing** so a corrected/resent record updates the existing Silver row instead of creating a duplicate.
 - **Returns are preserved**, not filtered out, because they're real business events — handled explicitly in Gold's revenue logic instead of being dropped upstream.
 - **The watermark moves only after Bronze, Silver, and Gold succeed**, so a mid-pipeline failure doesn't cause rows to be silently skipped on the next run.
@@ -162,6 +204,8 @@ This is not a one-click deployment — steps 1, 2, and 7–9 require manual setu
 
 ```text
 retail-data-engineering-pipeline/
+├── .github/workflows/
+│   └── pyspark-tests.yml        # CI: Parquet + Delta Lake test suites
 ├── data/
 │   └── batch_006.csv
 ├── docs/
@@ -170,6 +214,14 @@ retail-data-engineering-pipeline/
 │   └── screenshots/
 ├── notebooks/
 │   └── 05_rfm_customer_segmentation.ipynb
+├── pyspark/                     # line-level PySpark implementation (see pyspark/README.md)
+│   ├── retail_pipeline/         # bronze, quality, silver, gold, commit, storage
+│   ├── notebooks/               # Databricks tasks 10-14
+│   ├── jobs/                    # Databricks Job definition
+│   ├── tests/                   # pytest suite
+│   ├── scripts/                 # full-dataset and integration validation
+│   ├── docs/                    # design, findings, procedure, results
+│   └── legacy_notebooks/        # original exploratory notebooks 06-09
 ├── sql/
 │   ├── 00_setup_tables.sql
 │   ├── 01_bronze_ingestion.sql
@@ -183,4 +235,4 @@ retail-data-engineering-pipeline/
 ## Limitations and Scope
 
 - This is a portfolio/learning project demonstrating Medallion Architecture, incremental processing, and Databricks Workflows — not a production system.
-- The Databricks Job, its tasks, dependencies, and file-arrival trigger are configured in the Databricks UI and aren't exported as files in this repository.
+- The SQL pipeline's Databricks Job, its tasks, dependencies, and file-arrival trigger are configured in the Databricks UI and aren't exported as files in this repository. The PySpark Job is defined in [`pyspark/jobs/`](pyspark/jobs/retail_pyspark_pipeline.job.yml).
