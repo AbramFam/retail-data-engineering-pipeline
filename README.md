@@ -41,11 +41,32 @@ Results on the full dataset (identical in local runs, CI and Databricks):
 
 Full story: [findings and SQL parity](pyspark/docs/findings_and_parity.md) · [design](pyspark/docs/design.md) · [Databricks validation procedure](pyspark/docs/databricks_integration_procedure.md).
 
----
 
-The sections below document the original SQL pipeline.
+## PySpark Pipeline (Current)
 
-## Architecture
+The line-level PySpark implementation in [`pyspark/`](pyspark/README.md) is the current version of the pipeline. It writes only to its own schema, `workspace.retail_pipeline_pyspark`, and runs as the Databricks Job `retail_pyspark_pipeline` (`bronze → silver → gold → commit`, serverless).
+
+- **Grain:** one Silver row per source line, identified by `bronze_row_id` (SHA-256 of the file + physical line number), never by a business key.
+- **Input contract:** each CSV has a manifest declaring `NEW_DATA` or `CORRECTION`, a `batch_sequence` and the expected row count; files are immutable.
+- **Corrections:** a `CORRECTION` batch restates every line of each `InvoiceNo + StockCode` it touches; older lines are kept as history (`SUPERSEDED`), and an older correction can never overwrite a newer one.
+- **Data quality:** invalid quantities, prices or dates go to `silver_quarantine` with a reason; a correction with invalid rows is held for review and blocks the watermark.
+- **Gold:** KPIs (Notebook 08 rules: accounting-adjustment invoices `A…` excluded), monthly, country, top products, plus `gold_top_merchandise` and `gold_revenue_by_class` (StockCode classification rule v1).
+
+How to run, test and deploy it: [`pyspark/README.md`](pyspark/README.md). Design: [`pyspark/docs/design.md`](pyspark/docs/design.md).
+
+## Technologies Used
+
+- Databricks (serverless compute, Jobs/Workflows, Volumes, Git folders, Unity Catalog)
+- SQL and PySpark
+- Delta Lake (`COPY INTO`, `MERGE`)
+- pytest and GitHub Actions (CI with real Delta Lake tests)
+- Git and GitHub
+
+## Original SQL Pipeline (v1)
+
+The first version of the pipeline, kept unchanged in [`sql/`](sql/) for comparison. Everything in this section describes the SQL version only: its Silver layer deduplicates on `InvoiceNo + StockCode`, which drops legitimate lines (see [Highlights](#highlights)), and its KPI definitions differ from the PySpark rules ([details](pyspark/docs/findings_and_parity.md)).
+
+### Architecture
 
 The pipeline follows the Medallion Architecture:
 
@@ -57,15 +78,7 @@ The pipeline follows the Medallion Architecture:
 
 Full diagram and per-task dependency breakdown: [docs/architecture.md](docs/architecture.md).
 
-## Technologies Used
-
-- Databricks (serverless compute, Jobs/Workflows, Volumes, Git folders, Unity Catalog)
-- SQL and PySpark
-- Delta Lake (`COPY INTO`, `MERGE`)
-- pytest and GitHub Actions (CI with real Delta Lake tests)
-- Git and GitHub
-
-## Pipeline Automation and Incremental Processing
+### Pipeline Automation and Incremental Processing
 
 The pipeline runs as a Databricks Job with task order `bronze_ingestion → silver_processing → gold_tables → watermark_update`. A file-arrival trigger starts the Job automatically when a new CSV lands in the Databricks Volume. The watermark only advances after Bronze, Silver, and Gold all succeed, so a failed run doesn't cause data to be skipped.
 
@@ -75,7 +88,7 @@ The pipeline runs as a Databricks Job with task order `bronze_ingestion → silv
 - `ROW_NUMBER()` selects the latest version of each record using `InvoiceNo + StockCode` as the business key.
 - `MERGE` updates matched records and inserts new ones into Silver.
 
-## Gold Layer Outputs
+### Gold Layer Outputs
 
 - `gold_kpis_v2`: Gross revenue, net revenue, returns value, total customers, average order value, and total orders.
 - `gold_monthly_sales_v2`: Monthly net revenue.
@@ -84,7 +97,7 @@ The pipeline runs as a Databricks Job with task order `bronze_ingestion → silv
 
 Returns are preserved as valid business events in Silver; their effect on revenue is handled explicitly in Gold (see KPI Definitions below).
 
-## KPI Definitions
+### KPI Definitions
 
 Business assumptions encoded in `sql/03_gold_tables.sql`, not universal accounting definitions — they could change depending on how a business wants revenue/returns treated.
 
@@ -100,9 +113,76 @@ Business assumptions encoded in `sql/03_gold_tables.sql`, not universal accounti
 | Country Sales | Net Revenue grouped by `Country`. |
 | Top Products | Positive-quantity revenue only, top 10 by revenue. |
 
-## RFM Customer Segmentation (Extension)
+### Key Engineering Decisions
 
-A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the Gold layer with customer segmentation. It runs separately from the Databricks Job and is not one of its tasks.
+- **Bronze preserves source metadata** (`source_file`, `ingestion_timestamp`, `batch_id`, `source_system`) so every row can be traced to its file/batch, and Silver has a reliable timestamp for incremental filtering.
+- **Silver uses a business key (`InvoiceNo + StockCode`) and latest-record logic** because the same invoice/product pair can reappear across batches if a record is corrected or resent; only the newest version should apply. *A later audit showed this key is not unique in the source data, so this step drops legitimate lines; the PySpark implementation replaces it with line-level identity and explicit corrections.*
+- **`MERGE` replaces insert-only processing** so a corrected/resent record updates the existing Silver row instead of creating a duplicate.
+- **Returns are preserved**, not filtered out, because they're real business events — handled explicitly in Gold's revenue logic instead of being dropped upstream.
+- **The watermark moves only after Bronze, Silver, and Gold succeed**, so a mid-pipeline failure doesn't cause rows to be silently skipped on the next run.
+
+### Testing
+
+Tested end-to-end in Databricks — manually, via the workspace UI — using a 5-row incremental CSV batch with 2 designed updates and 3 designed inserts. Coverage included the file-arrival trigger, Bronze/Silver/Gold processing, watermark advancement, idempotency on reprocessing, an intentional Gold-task failure with the watermark correctly blocked, a Repair Run recovering from it, and validation of the setup script in a separate schema.
+
+Full test list, expected vs. observed results, and evidence status (screenshots not yet added): [docs/testing.md](docs/testing.md).
+
+### Sample Data
+
+`data/batch_006.csv` is a small synthetic incremental test batch, not the project's full dataset. It contains 5 rows: 2 using `InvoiceNo + StockCode` values designed to match existing business keys already loaded into `silver_sales_v2` (exercising the `MERGE` update path), and 3 using new keys designed as inserts.
+
+The original base retail dataset these updates were tested against isn't included in this repository. Reproducing the exact update behavior in [docs/testing.md](docs/testing.md) requires a base dataset already loaded into Silver with matching `InvoiceNo`/`StockCode` values. Without one, the pipeline still runs end-to-end — the 3 new-key rows insert normally, but nothing matches the 2 update-designed rows.
+
+#### Expected CSV Schema
+
+```text
+InvoiceNo
+StockCode
+Description
+Quantity
+InvoiceDate
+UnitPrice
+CustomerID
+Country
+```
+
+### Prerequisites
+
+- A Databricks workspace with SQL warehouse or cluster access.
+- Permission to create catalogs/schemas, tables, Volumes, and Jobs.
+- `data/batch_006.csv`, or a compatible CSV matching the [Expected CSV Schema](#expected-csv-schema).
+
+### Configuration Note: Volume Path
+
+`sql/01_bronze_ingestion.sql` reads from a hardcoded path:
+
+```text
+/Volumes/workspace/default/raw_data/daily_sales
+```
+
+This is the path tested in this project's own workspace (`workspace` catalog, `default` schema) and is environment-specific. If your catalog, schema, or Volume name differs, edit the `FROM '...'` path directly in `sql/01_bronze_ingestion.sql` before running it.
+
+### How to Run
+
+Steps are labeled by where they happen: **[SQL]** run from a file in this repo, **[UI]** configured in the Databricks workspace UI, **[Optional]** testing/validation only.
+
+1. **[UI]** Create or select the Databricks catalog and schema (tested example: `workspace.default`).
+2. **[UI]** Create a Volume and an input directory for incoming CSV files (tested example: `/Volumes/workspace/default/raw_data/daily_sales`).
+3. **[SQL, manual edit]** If using a different catalog/schema/Volume, update the `FROM '...'` path in `sql/01_bronze_ingestion.sql` to match.
+4. **[SQL]** Run `sql/00_setup_tables.sql` to create `bronze_sales_v2`, `silver_sales_v2`, and `pipeline_watermark`, and seed the initial watermark row.
+5. **[UI]** Upload your base retail CSV data (matching the schema above) into the Volume directory from step 2.
+6. **[SQL]** Run the files in order for the initial load: `sql/01_bronze_ingestion.sql` → `sql/02_silver_processing.sql` → `sql/03_gold_tables.sql` → `sql/04_watermark_update.sql`.
+7. **[UI]** A Databricks Job cannot run a local repository file directly — for each of the four SQL files, create and save a Databricks SQL query containing that file's contents, then create a matching Job task (`bronze_ingestion`, `silver_processing`, `gold_tables`, `watermark_update`) configured to run that saved query.
+8. **[UI]** Configure task dependencies so each task only runs after the previous one succeeds, in the order above.
+9. **[UI]** Configure a file-arrival trigger on the Job, pointed at the Volume directory from step 2.
+10. **[Optional]** Upload `data/batch_006.csv` (or another compatible incremental CSV) to trigger an incremental run.
+11. **[Optional]** Validate results by querying `bronze_sales_v2`, `silver_sales_v2`, the four Gold tables, and `pipeline_watermark`.
+
+This is not a one-click deployment — steps 1, 2, and 7–9 require manual setup in the Databricks UI.
+
+## RFM Customer Segmentation (Extension of the SQL Pipeline)
+
+A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the **SQL pipeline's** Gold layer with customer segmentation. It reads the SQL Silver table (`workspace.default.silver_sales_v2`), runs separately, and is not a task of either Databricks Job; it has not been ported to the PySpark pipeline.
 
 - **Source:** `workspace.default.silver_sales_v2`.
 - **Filters:** Positive `Quantity` and `UnitPrice` only; `CustomerID` `-1` (unknown customers) is excluded.
@@ -126,79 +206,6 @@ A PySpark notebook, `notebooks/05_rfm_customer_segmentation.ipynb`, extends the 
 
 - `workspace.default.gold_customer_rfm`: One row per customer with reference date, last purchase date, Recency, Frequency, Monetary, R/F/M scores, and Segment.
 - `workspace.default.gold_rfm_segment_summary`: Customer count per segment.
-
-## PySpark Implementation (Line-Level)
-
-A separate PySpark implementation lives in [`pyspark/`](pyspark/README.md) (summary in [Highlights](#highlights)). It does not replace or modify the SQL pipeline above and writes only to its own schema, `workspace.retail_pipeline_pyspark`.
-
-Main differences: it keeps every source line (the `InvoiceNo + StockCode` key is not unique in the data), applies updates only through explicit, versioned `CORRECTION` batches, quarantines invalid rows with reasons, and tracks batch status so the watermark never moves past a failed step or an unreviewed correction. It is covered by automated tests in GitHub Actions (Parquet and Delta) and was validated in Databricks on the full 541,909-row dataset, reproducing the Notebook 08 KPIs exactly without touching any existing table. Details: [design](pyspark/docs/design.md), [findings and SQL parity](pyspark/docs/findings_and_parity.md).
-
-## Key Engineering Decisions
-
-- **Bronze preserves source metadata** (`source_file`, `ingestion_timestamp`, `batch_id`, `source_system`) so every row can be traced to its file/batch, and Silver has a reliable timestamp for incremental filtering.
-- **Silver uses a business key (`InvoiceNo + StockCode`) and latest-record logic** because the same invoice/product pair can reappear across batches if a record is corrected or resent; only the newest version should apply. *A later audit showed this key is not unique in the source data, so this step drops legitimate lines; the PySpark implementation replaces it with line-level identity and explicit corrections.*
-- **`MERGE` replaces insert-only processing** so a corrected/resent record updates the existing Silver row instead of creating a duplicate.
-- **Returns are preserved**, not filtered out, because they're real business events — handled explicitly in Gold's revenue logic instead of being dropped upstream.
-- **The watermark moves only after Bronze, Silver, and Gold succeed**, so a mid-pipeline failure doesn't cause rows to be silently skipped on the next run.
-
-## Testing
-
-Tested end-to-end in Databricks — manually, via the workspace UI — using a 5-row incremental CSV batch with 2 designed updates and 3 designed inserts. Coverage included the file-arrival trigger, Bronze/Silver/Gold processing, watermark advancement, idempotency on reprocessing, an intentional Gold-task failure with the watermark correctly blocked, a Repair Run recovering from it, and validation of the setup script in a separate schema.
-
-Full test list, expected vs. observed results, and evidence status (screenshots not yet added): [docs/testing.md](docs/testing.md).
-
-## Sample Data
-
-`data/batch_006.csv` is a small synthetic incremental test batch, not the project's full dataset. It contains 5 rows: 2 using `InvoiceNo + StockCode` values designed to match existing business keys already loaded into `silver_sales_v2` (exercising the `MERGE` update path), and 3 using new keys designed as inserts.
-
-The original base retail dataset these updates were tested against isn't included in this repository. Reproducing the exact update behavior in [docs/testing.md](docs/testing.md) requires a base dataset already loaded into Silver with matching `InvoiceNo`/`StockCode` values. Without one, the pipeline still runs end-to-end — the 3 new-key rows insert normally, but nothing matches the 2 update-designed rows.
-
-### Expected CSV Schema
-
-```text
-InvoiceNo
-StockCode
-Description
-Quantity
-InvoiceDate
-UnitPrice
-CustomerID
-Country
-```
-
-## Prerequisites
-
-- A Databricks workspace with SQL warehouse or cluster access.
-- Permission to create catalogs/schemas, tables, Volumes, and Jobs.
-- `data/batch_006.csv`, or a compatible CSV matching the [Expected CSV Schema](#expected-csv-schema).
-
-## Configuration Note: Volume Path
-
-`sql/01_bronze_ingestion.sql` reads from a hardcoded path:
-
-```text
-/Volumes/workspace/default/raw_data/daily_sales
-```
-
-This is the path tested in this project's own workspace (`workspace` catalog, `default` schema) and is environment-specific. If your catalog, schema, or Volume name differs, edit the `FROM '...'` path directly in `sql/01_bronze_ingestion.sql` before running it.
-
-## How to Run
-
-Steps are labeled by where they happen: **[SQL]** run from a file in this repo, **[UI]** configured in the Databricks workspace UI, **[Optional]** testing/validation only.
-
-1. **[UI]** Create or select the Databricks catalog and schema (tested example: `workspace.default`).
-2. **[UI]** Create a Volume and an input directory for incoming CSV files (tested example: `/Volumes/workspace/default/raw_data/daily_sales`).
-3. **[SQL, manual edit]** If using a different catalog/schema/Volume, update the `FROM '...'` path in `sql/01_bronze_ingestion.sql` to match.
-4. **[SQL]** Run `sql/00_setup_tables.sql` to create `bronze_sales_v2`, `silver_sales_v2`, and `pipeline_watermark`, and seed the initial watermark row.
-5. **[UI]** Upload your base retail CSV data (matching the schema above) into the Volume directory from step 2.
-6. **[SQL]** Run the files in order for the initial load: `sql/01_bronze_ingestion.sql` → `sql/02_silver_processing.sql` → `sql/03_gold_tables.sql` → `sql/04_watermark_update.sql`.
-7. **[UI]** A Databricks Job cannot run a local repository file directly — for each of the four SQL files, create and save a Databricks SQL query containing that file's contents, then create a matching Job task (`bronze_ingestion`, `silver_processing`, `gold_tables`, `watermark_update`) configured to run that saved query.
-8. **[UI]** Configure task dependencies so each task only runs after the previous one succeeds, in the order above.
-9. **[UI]** Configure a file-arrival trigger on the Job, pointed at the Volume directory from step 2.
-10. **[Optional]** Upload `data/batch_006.csv` (or another compatible incremental CSV) to trigger an incremental run.
-11. **[Optional]** Validate results by querying `bronze_sales_v2`, `silver_sales_v2`, the four Gold tables, and `pipeline_watermark`.
-
-This is not a one-click deployment — steps 1, 2, and 7–9 require manual setup in the Databricks UI.
 
 ## Project Structure
 
